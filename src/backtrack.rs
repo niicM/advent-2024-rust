@@ -1,10 +1,11 @@
-use std::{collections::HashSet, hash::Hash};
+use std::{collections::HashSet, fmt::{Debug, Display}, hash::Hash};
 
-trait Backtrack {
-    type State: Hash + Eq + Clone;
+pub trait Backtrack {
+    type State: Hash + Eq + Clone + Display + Debug;
     type Accum: Clone;
     type World;
 
+    // fn stop(state: Self::State) -> bool;
     fn get_initial(world: &Self::World) -> (Self::State, Self::Accum);
     fn get_next_states(world: &Self::World, state: &Self::State) -> Vec<Self::State>;
     fn get_next_accum(
@@ -16,7 +17,7 @@ trait Backtrack {
     fn get_score(world: &Self::World, state: &Self::State, accum: &Self::Accum) -> Option<i32>;
 }
 
-fn solve<B: Backtrack>(world: B::World) -> (Vec<B::State>, i32) {
+pub fn solve<B: Backtrack>(world: B::World) -> (Vec<B::State>, i32) {
     #[derive(Clone)]
     struct Moment<State, Accum> {
         state_index: usize,
@@ -26,9 +27,11 @@ fn solve<B: Backtrack>(world: B::World) -> (Vec<B::State>, i32) {
 
     let mut best_solution: (Vec<B::State>, i32) = (Vec::new(), std::i32::MIN);
     let mut current_path: Vec<Moment<B::State, B::Accum>> = Vec::new();
-    let visited: HashSet<B::State> = HashSet::new();
+    let mut visited: HashSet<B::State> = HashSet::new();
 
     let (state, accum) = B::get_initial(&world);
+    visited.insert(state.clone());
+
     current_path.push(Moment {
         state_index: 0,
         state_list: vec![state],
@@ -36,7 +39,7 @@ fn solve<B: Backtrack>(world: B::World) -> (Vec<B::State>, i32) {
     });
 
     loop {
-        let last_moment = current_path.last().unwrap();
+        let last_moment = current_path.last_mut().unwrap();
         let last_moment_idx = last_moment.state_index;
 
         if last_moment.state_index < last_moment.state_list.len() {
@@ -47,6 +50,18 @@ fn solve<B: Backtrack>(world: B::World) -> (Vec<B::State>, i32) {
                     .into_iter()
                     .filter(|s| !visited.contains(s))
                     .collect();
+            
+            println!("next {:?}", next_states);
+
+            // Only create a new moment if there are actual states to go to.
+            if next_states.is_empty() {
+                // println!("stop {}", last_moment.state_list[last_moment_idx]);
+                visited.remove(&last_moment.state_list[last_moment.state_index]);
+                last_moment.state_index += 1;
+                continue;
+            }
+
+            visited.insert(next_states[0].clone());
 
             let next_accums: Vec<B::Accum> = next_states
                 .iter()
@@ -69,11 +84,13 @@ fn solve<B: Backtrack>(world: B::World) -> (Vec<B::State>, i32) {
             // backtrack
 
             while let Some(last_moment) = current_path.last_mut() {
-                let depleted_choices = last_moment.state_index >= last_moment.state_list.len() - 1;
+                let depleted_choices = last_moment.state_index >= last_moment.state_list.len();
                 if depleted_choices {
                     current_path.pop();
                     continue;
                 } else {
+                    println!("remove {}", &last_moment.state_list[last_moment.state_index]);
+                    visited.remove(&last_moment.state_list[last_moment.state_index]);
                     last_moment.state_index += 1;
                     break;
                 }
@@ -83,10 +100,15 @@ fn solve<B: Backtrack>(world: B::World) -> (Vec<B::State>, i32) {
         if current_path.is_empty() {
             break;
         }
+        
         // Check the score of the new state
 
         let last_moment = current_path.last().unwrap();
         let last_moment_idx = last_moment.state_index;
+
+        if last_moment_idx >= last_moment.state_list.len() {
+            continue;
+        }
 
         let score = B::get_score(
             &world,
@@ -95,6 +117,7 @@ fn solve<B: Backtrack>(world: B::World) -> (Vec<B::State>, i32) {
         );
 
         if let Some(score) = score {
+            println!("score: {} {}", score, current_path.len());
             if score > best_solution.1 {
                 let path = current_path
                     .iter()
